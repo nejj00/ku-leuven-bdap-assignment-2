@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <vector>
 #include <tuple>
+#include <immintrin.h>
 
 using std::chrono::steady_clock;
 using std::chrono::microseconds;
@@ -127,6 +128,17 @@ fmatrix evaluate_scalar(const fmatrix& x, const fmatrix& y,
     fmatrix output(x.nrows, 1, 1, 1);
 
     // TODO implement this method using regular C++
+    for (size_t i = 0; i < x.nrows; i++)
+     {
+        float sum = intercept;
+
+        for (size_t j = 0; j < x.ncols; j++) {
+            sum += x.get_elem(i, j) * coef.get_elem(j, 0);
+        }
+        
+        output.set_elem(i, 0, std::move(sum));
+    }
+
     //
     // You CANNOT use threads.
     // We are forbidding multithreading to make the coding take less time and
@@ -152,8 +164,8 @@ fmatrix evaluate_simd(const fmatrix& x, const fmatrix& y,
 int main(int argc, char *argv[])
 {
     // These are four linear regression models
-    auto &&[x, y, coef, intercept] = read_bin_data("data/calhouse.bin");
-    //auto &&[x, y, coef, intercept] = read_bin_data("data/allstate.bin");
+    // auto &&[x, y, coef, intercept] = read_bin_data("data/calhouse.bin");
+    auto &&[x, y, coef, intercept] = read_bin_data("data/allstate.bin");
     //auto &&[x, y, coef, intercept] = read_bin_data("data/diamonds.bin");
     //auto &&[x, y, coef, intercept] = read_bin_data("data/cpusmall.bin");
 
