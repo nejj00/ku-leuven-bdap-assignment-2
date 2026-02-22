@@ -153,6 +153,43 @@ fmatrix evaluate_simd(const fmatrix& x, const fmatrix& y,
 
     // TODO implement this method using SIMD intrinsic functions. See the second
     // exercise session.
+    
+    for (size_t i = 0; i < x.nrows; i++)
+    {
+        __m256 sum_vec = _mm256_setzero_ps();
+
+        size_t j = 0;
+
+        // Process 8 elements per iteration
+        for (; j + 7 < x.ncols; j += 8)
+        {
+            __m256 x_vec    = _mm256_loadu_ps(x.ptr(i, j));
+            __m256 coef_vec = _mm256_loadu_ps(coef.ptr(j, 0));
+
+            sum_vec = _mm256_fmadd_ps(x_vec, coef_vec, sum_vec);
+        }
+
+        // Horizontal reduction of 8 floats in sum_vec
+        __m128 low  = _mm256_castps256_ps128(sum_vec);
+        __m128 high = _mm256_extractf128_ps(sum_vec, 1);
+        __m128 sum128 = _mm_add_ps(low, high);
+
+        sum128 = _mm_hadd_ps(sum128, sum128);
+        sum128 = _mm_hadd_ps(sum128, sum128);
+
+        float final_sum = _mm_cvtss_f32(sum128);
+
+        // Handle remaining elements
+        for (; j < x.ncols; j++)
+        {
+            final_sum += x.get_elem(i, j) * coef.get_elem(j, 0);
+        }
+
+        final_sum += intercept;
+
+        output.set_elem(i, 0, std::move(final_sum));
+    }
+
     //
     // You CANNOT use threads.
     // We are forbidding multithreading to make the coding take less time and
