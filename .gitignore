@@ -2,3 +2,5 @@ data
 .vscode
 *.exe
 target
+.venv
+__pycache__
