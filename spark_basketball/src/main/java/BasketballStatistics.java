@@ -1,36 +1,118 @@
-import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.expressions.Window;
+import org.apache.spark.sql.expressions.WindowSpec;
 
+import static org.apache.spark.sql.functions.*;
 
 public class BasketballStatistics {
 
-    private static void distanceTravelled(String fileName) {
-
-        SparkConf sparkConf = new SparkConf().setMaster("local").setAppName("Distance Travelled");
-
-        JavaSparkContext sparkContext = new JavaSparkContext(sparkConf);
-    }
-
     public static void main(String[] args) {
+        if (args.length == 0) {
+            System.out.println("Usage: BasketballStatistics <path_to_data_dir>");
+            System.exit(0);
+        }
 
-        // if (args.length == 0) {
-        //     System.out.println("No files provided.");
-        //     System.exit(0);
-        // }
+        String dataDir = args[0];
+        // Ensure no trailing slash
+        if (dataDir.endsWith("/")) {
+            dataDir = dataDir.substring(0, dataDir.length() - 1);
+        }
 
+        SparkSession spark = SparkSession.builder()
+                .appName("Basketball Statistics")
+                .getOrCreate();
+
+        // Load CSVs
+        Dataset<Row> games = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/games.csv");
+
+        Dataset<Row> players = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/players.csv");
+
+        Dataset<Row> teams = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/teams.csv");
+
+        Dataset<Row> minutesPlayed = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/minutes_played.csv");
+
+        // Events and moments are directories containing one CSV per game
+        Dataset<Row> events = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/events/*.csv");
+
+        Dataset<Row> moments = spark.read()
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(dataDir + "/moments/*.csv");
+
+        // Show first 5 rows of each
+        System.out.println("=== games ===");
+        games.show(5);
+
+        System.out.println("=== players ===");
+        players.show(5);
+
+        System.out.println("=== teams ===");
+        teams.show(5);
+
+        System.out.println("=== minutes_played ===");
+        minutesPlayed.show(5);
+
+        System.out.println("=== events ===");
+        events.show(5);
+
+        // 3.1 Total distance 
+        System.out.println("=== moments ===");
+        moments.show(100);
+
+        // FIlter out ball moments
+        Dataset<Row> players_moments = moments.filter(col("player_id").notEqual(-1));
+        System.out.println("=== players_moments ===");
+        players_moments.show(100);
+
+        // Deduplicate moments (duplicates have happened becaause more than one event can happen at the same timestamp)
+        Dataset<Row> players_moments_deduped = players_moments.dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+                .sort(col("game_id"), col("player_id"), col("quarter"), col("game_clock").desc());
+                
+        System.out.println("=== players_moments_deduped ===");
+        players_moments_deduped.show(100);
+
+        WindowSpec window = Window
+                .partitionBy("game_id", "player_id")
+                .orderBy(col("quarter").asc(), col("game_clock").desc());
+
+        Dataset<Row> players_moments_deduped_with_next = players_moments_deduped
+                .withColumn("x_next", lead("x_loc", 1).over(window))
+                .withColumn("y_next", lead("y_loc", 1).over(window));
+
+        System.out.println("=== players_moments_deduped_with_next ===");
+        players_moments_deduped_with_next.show(100);
+
+        Dataset<Row> players_moments_distance = players_moments_deduped_with_next.withColumn(
+                "dist_m",
+                expr("(sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2))) * 0.3048")); // Convert feet to meters
         
-        SparkSession spark = SparkSession
-        .builder()
-        .appName("Java Spark SQL basic example")
-        .config("spark.some.config.option", "some-value")
-        .getOrCreate();
+        System.out.println("=== players_moments_distance ===");
+        players_moments_distance.show(100);
 
-        Dataset<Row> df = spark.read().csv("/home/neji/ku-leuven-bdap-assignment-2/spark_basketball/data/teams.csv");
+        Dataset<Row> total_distance_per_player = players_moments_distance.groupBy("player_id")
+                .agg(sum("dist_m").alias("total_distance_m"))
+                .orderBy(col("total_distance_m").desc());
 
-        // Displays the content of the DataFrame to stdout
-        df.show();
+        System.out.println("=== total_distance_per_player ===");
+        total_distance_per_player.show(100);
+
+        spark.stop();
     }
 }
