@@ -89,7 +89,7 @@ public class BasketballStatistics {
         players_moments_deduped.show(100);
 
         WindowSpec window = Window
-                .partitionBy("game_id", "player_id")
+                .partitionBy("game_id", "player_id", "quarter")
                 .orderBy(col("quarter").asc(), col("game_clock").desc());
 
         Dataset<Row> players_moments_deduped_with_next = players_moments_deduped
@@ -99,6 +99,7 @@ public class BasketballStatistics {
         System.out.println("=== players_moments_deduped_with_next ===");
         players_moments_deduped_with_next.show(100);
 
+        // Calculate distance between current and next moment
         Dataset<Row> players_moments_distance = players_moments_deduped_with_next.withColumn(
                 "dist_m",
                 expr("(sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2))) * 0.3048")); // Convert feet to meters
@@ -106,12 +107,40 @@ public class BasketballStatistics {
         System.out.println("=== players_moments_distance ===");
         players_moments_distance.show(100);
 
+        // Calculate total distance per player
         Dataset<Row> total_distance_per_player = players_moments_distance.groupBy("player_id")
                 .agg(sum("dist_m").alias("total_distance_m"))
                 .orderBy(col("total_distance_m").desc());
 
         System.out.println("=== total_distance_per_player ===");
         total_distance_per_player.show(100);
+
+        // Total minutes played per player
+        Dataset<Row> total_seconds = minutesPlayed.groupBy("player_id")
+                .agg(sum("sec").alias("total_seconds"))
+                .orderBy(col("total_seconds").desc());
+
+        Dataset<Row> total_minutes = total_seconds.withColumn("total_minutes", col("total_seconds").divide(60))
+                .orderBy(col("total_minutes").desc());
+
+        System.out.println("=== total_minutes ===");
+        total_minutes.show(100);
+
+        Dataset<Row> distance_and_minutes = total_distance_per_player.join(total_minutes, "player_id")
+                .select("player_id", "total_distance_m", "total_minutes");
+        
+        System.out.println("=== distance_and_minutes ===");
+        distance_and_minutes.show(100);
+
+        
+        Dataset<Row> total_distance_per_quater = distance_and_minutes.withColumn(
+                "distance_per_quarter_m",
+                expr("total_distance_m * 12 / total_minutes"))
+                .orderBy(col("distance_per_quarter_m").desc()); // 12 minutes per quarter
+
+        System.out.println("=== total_distance_per_quater ===");
+        total_distance_per_quater.show(100);
+
 
         spark.stop();
     }
