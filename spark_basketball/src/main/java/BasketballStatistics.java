@@ -78,7 +78,8 @@ public class BasketballStatistics {
         moments = moments.dropDuplicates("game_id", "player_id", "quarter", "game_clock")
                          .withColumn("x_loc",  col("x_loc").multiply(FEET_TO_METERS))
                          .withColumn("y_loc",  col("y_loc").multiply(FEET_TO_METERS))
-                         .withColumn("radius", col("radius").multiply(FEET_TO_METERS));
+                         .withColumn("radius", col("radius").multiply(FEET_TO_METERS))
+                         .sort(col("game_id"), col("quarter"), col("game_clock").desc(), col("player_id"));
 
         System.out.println("=== moments ===");
         moments.show(100);
@@ -88,7 +89,8 @@ public class BasketballStatistics {
         Dataset<Row> distancePerQuarter = distanceTravelled.compute();
         distancePerQuarter.show(100);
 
-
+        BallPossession ballPossession = new BallPossession(moments, minutesPlayed);
+        Dataset<Row> possession = ballPossession.compute();
 
         spark.stop();
     }
