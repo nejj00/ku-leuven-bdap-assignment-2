@@ -64,7 +64,7 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
             .filter(col("SCOREMARGIN_FILLED").isNotNull())
             .filter(col("PERIOD").geq(4))
             .filter(col("game_clock_seconds").leq(300))
-            // .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
+            .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
             .select(
                 col("GAME_ID").alias("game_id"),
                 col("EVENTNUM").alias("event_id"),
