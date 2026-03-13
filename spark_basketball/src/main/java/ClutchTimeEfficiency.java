@@ -13,9 +13,8 @@ public class ClutchTimeEfficiency {
     // After converting to meters, half court is at x = 94 * 0.3048 / 2 = 14.326m
     private static final double HALF_COURT_M     = 94 * 0.3048 / 2;  // 14.326m
     private static final double LEFT_BASKET_X_M  = 5.25  * 0.3048;   // 1.600m
-    private static final double LEFT_BASKET_Y_M  = 25.0  * 0.3048;   // 7.620m
+    private static final double BASKET_Y_M  = 25.0  * 0.3048;   // 7.620m
     private static final double RIGHT_BASKET_X_M = 88.75 * 0.3048;   // 27.051m
-    private static final double RIGHT_BASKET_Y_M = 25.0  * 0.3048;   // 7.620m
 
 // 3-point line radius from the assignment: 6.71 meters
 private static final double THREE_POINT_RADIUS_M = 6.71;
@@ -26,17 +25,12 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
     }
 
     public Dataset<Row> compute() {
-        Dataset<Row> clutchShots     = identifyClutchShots();
-        System.out.println("=== clutchShots ===");
-        clutchShots.show(100);
-        Dataset<Row> withLocation    = joinWithShotLocation(clutchShots);
-        System.out.println("=== withLocation ===");
-        withLocation.show(100);
-        Dataset<Row> withShotType    = classifyShotType(withLocation);
-        System.out.println("=== withShotType ===");
-        withShotType.show(100);
+        Dataset<Row> clutchShots = identifyClutchShots();
+        Dataset<Row> withLocation = joinWithShotLocation(clutchShots);
+        Dataset<Row> withShotType = classifyShotType(withLocation);
+        Dataset<Row> result = aggregateEfficiency(withShotType);
 
-        return withShotType;
+        return result;
     }
 
     // Step 1: Filter events to clutch time shot attempts only
@@ -182,7 +176,7 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                     when(col("x_loc").lt(HALF_COURT_M), lit(LEFT_BASKET_X_M))
                     .otherwise(lit(RIGHT_BASKET_X_M))
                 )
-                .withColumn("basket_y", lit(LEFT_BASKET_Y_M))
+                .withColumn("basket_y", lit(BASKET_Y_M))
                 .withColumn("dist_to_basket",
                     expr("sqrt(pow(x_loc - basket_x, 2) + pow(y_loc - basket_y, 2))")
                 )
@@ -203,5 +197,43 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                     col("game_clock_seconds"),
                     col("tracking_game_clock")
                 );
+    }
+
+    private Dataset<Row> aggregateEfficiency(Dataset<Row> withShotType) {
+        // Count total attempts and made shots per player per shot type
+        Dataset<Row> agg = withShotType
+                .groupBy("player_id", "shot_type")
+                .agg(
+                    count("*").alias("nb_shots"),
+                    sum(when(col("event_type").equalTo(1), 1).otherwise(0)).alias("nb_made")
+                );
+
+        // Pivot to get one row per player with 2pt and 3pt columns side by side
+        Dataset<Row> pivoted = agg
+                .groupBy("player_id")
+                .pivot("shot_type", java.util.Arrays.asList("2pt", "3pt"))
+                .agg(
+                    first("nb_shots").alias("shots"),
+                    first("nb_made").alias("made")
+                )
+                .na().fill(0);  // players with no 2pt or no 3pt attempts get 0
+
+        return pivoted
+                .withColumn("2pts_efficiency",
+                    when(col("2pt_shots").equalTo(0), lit(0.0))
+                    .otherwise(round(col("2pt_made").divide(col("2pt_shots")), 2))
+                )
+                .withColumn("3pts_efficiency",
+                    when(col("3pt_shots").equalTo(0), lit(0.0))
+                    .otherwise(round(col("3pt_made").divide(col("3pt_shots")), 2))
+                )
+                .select(
+                    col("player_id"),
+                    col("2pts_efficiency"),
+                    col("2pt_shots").alias("nb_2pts_shots"),
+                    col("3pts_efficiency"),
+                    col("3pt_shots").alias("nb_3pts_shots")
+                )
+                .orderBy(col("2pts_efficiency").desc());
     }
 }

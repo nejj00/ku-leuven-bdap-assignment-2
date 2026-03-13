@@ -57,40 +57,35 @@ public class BasketballStatistics {
                 .option("inferSchema", "true")
                 .csv(dataDir + "/moments/*.csv");
 
-        // Show first 5 rows of each
-        System.out.println("=== games ===");
-        games.show(5);
-
-        System.out.println("=== players ===");
-        players.show(5);
-
-        System.out.println("=== teams ===");
-        teams.show(5);
-
-        System.out.println("=== minutes_played ===");
-        minutesPlayed.show(5);
-
-        System.out.println("=== events ===");
-        events.show(5);
-
         final double FEET_TO_METERS = 0.3048;
         
-        moments = moments.dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+        Dataset<Row> deduped_moments = moments.dropDuplicates("game_id", "player_id", "quarter", "game_clock")
                          .withColumn("x_loc",  col("x_loc").multiply(FEET_TO_METERS))
                          .withColumn("y_loc",  col("y_loc").multiply(FEET_TO_METERS))
                          .withColumn("radius", col("radius").multiply(FEET_TO_METERS))
                          .sort(col("game_id"), col("quarter"), col("game_clock").desc(), col("player_id"));
 
-        System.out.println("=== moments ===");
-        moments.show(100);
-
-        // 3.1 Total distance 
-        DistanceTravelled distanceTravelled = new DistanceTravelled(moments, minutesPlayed);
+        // 3.2.1 Total distance 
+        DistanceTravelled distanceTravelled = new DistanceTravelled(deduped_moments, minutesPlayed);
         Dataset<Row> distancePerQuarter = distanceTravelled.compute();
+        System.out.println("=== distancePerQuarter ===");
         distancePerQuarter.show(100);
 
-        BallPossession ballPossession = new BallPossession(moments, minutesPlayed);
+        // 3.2.2 Ball possession
+        BallPossession ballPossession = new BallPossession(deduped_moments, minutesPlayed);
         Dataset<Row> possession = ballPossession.compute();
+        System.out.println("=== possession ===");
+        possession.show(100);
+
+        // 3.2.3 Clutch time efficiency
+        Dataset<Row> moments_in_m = moments.withColumn("x_loc",  col("x_loc").multiply(FEET_TO_METERS))
+                        .withColumn("y_loc",  col("y_loc").multiply(FEET_TO_METERS))
+                        .withColumn("radius", col("radius").multiply(FEET_TO_METERS));
+
+        ClutchTimeEfficiency clutchTimeEfficiency = new ClutchTimeEfficiency(moments_in_m, events);
+        Dataset<Row> clutchEfficiency = clutchTimeEfficiency.compute();
+        System.out.println("=== clutch efficiency ===");
+        clutchEfficiency.show(100);
 
         spark.stop();
     }
