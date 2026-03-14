@@ -92,8 +92,9 @@ public class BallPossession {
         return possessionMoments
                 .withColumn("x_next", lead("x_loc", 1).over(window))
                 .withColumn("y_next", lead("y_loc", 1).over(window))
+                .withColumn("clock_next", lead("game_clock", 1).over(window))
                 .withColumn("dist_m", expr(
-                    "case when x_next is not null " +
+                    "case when x_next is not null and (game_clock - clock_next) <= 0.5 " +
                     "then sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2)) " +
                     "else 0 end"
                 ))
