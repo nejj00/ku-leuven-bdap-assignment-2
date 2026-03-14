@@ -7,7 +7,8 @@ import static org.apache.spark.sql.functions.*;
 
 public class ClutchTimeEfficiency {
 
-    private final Dataset<Row> moments;
+    private final Dataset<Row> playerMoments;
+    private final Dataset<Row> ballMoments;
     private final Dataset<Row> events;
 
     // After converting to meters, half court is at x = 94 * 0.3048 / 2 = 14.326m
@@ -19,63 +20,52 @@ public class ClutchTimeEfficiency {
 // 3-point line radius from the assignment: 6.71 meters
 private static final double THREE_POINT_RADIUS_M = 6.71;
 
-    public ClutchTimeEfficiency(Dataset<Row> moments, Dataset<Row> events) {
-        this.moments = moments;
+    public ClutchTimeEfficiency(Dataset<Row> playerMoments, Dataset<Row> ballMoments, Dataset<Row> events) {
+        this.playerMoments = playerMoments;
+        this.ballMoments = ballMoments;
         this.events = events;
     }
 
     public Dataset<Row> compute() {
         Dataset<Row> clutchShots = identifyClutchShots();
+        clutchShots = clutchShots.persist();
         Dataset<Row> withLocation = joinWithShotLocation(clutchShots);
         Dataset<Row> withShotType = classifyShotType(withLocation);
         Dataset<Row> result = aggregateEfficiency(withShotType);
+        clutchShots.unpersist();
 
         return result;
     }
 
     // Step 1: Filter events to clutch time shot attempts only
     private Dataset<Row> identifyClutchShots() {
-
-        System.out.println("=== events ===");
-        events.show(100);
-
         WindowSpec fillWindow = Window
                 .partitionBy("GAME_ID")
                 .orderBy(col("PERIOD").asc(), col("PCTIMESTRING").desc())
                 .rowsBetween(Window.unboundedPreceding(), 0);
 
-        Dataset<Row> eventsWithScore = events
-                .withColumn("SCORE_FILLED",
-                    last(col("SCORE"), true).over(fillWindow)
-                )
+        return events
+                // filter to shots first — reduces rows before the expensive window fill
+                .filter(col("EVENTMSGTYPE").isin(1, 2))
                 .withColumn("SCOREMARGIN_FILLED",
                     last(col("SCOREMARGIN"), true).over(fillWindow)
+                )
+                .withColumn("pc_str",             date_format(col("PCTIMESTRING"), "HH:mm"))
+                .withColumn("minutes",            expr("cast(split(pc_str, ':')[0] as int)"))
+                .withColumn("seconds",            expr("cast(split(pc_str, ':')[1] as int)"))
+                .withColumn("game_clock_seconds", expr("minutes * 60 + seconds"))
+                .filter(col("SCOREMARGIN_FILLED").isNotNull())
+                .filter(col("PERIOD").geq(4))
+                .filter(col("game_clock_seconds").leq(300))
+                .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
+                .select(
+                    col("GAME_ID").alias("game_id"),
+                    col("EVENTNUM").alias("event_id"),
+                    col("PERIOD").alias("quarter"),
+                    col("PLAYER1_ID").alias("player_id"),
+                    col("EVENTMSGTYPE").alias("event_type"),
+                    col("game_clock_seconds")
                 );
-
-        System.out.println("=== eventsWithScore ===");
-        eventsWithScore.show(100);
-
-        Dataset<Row> clutchShots = eventsWithScore
-            .filter(col("EVENTMSGTYPE").isin(1, 2))
-            .withColumn("pc_str",             date_format(col("PCTIMESTRING"), "HH:mm"))
-            .withColumn("minutes",            expr("cast(split(pc_str, ':')[0] as int)"))
-            .withColumn("seconds",            expr("cast(split(pc_str, ':')[1] as int)"))
-            .withColumn("game_clock_seconds", expr("minutes * 60 + seconds"))
-            .filter(col("SCOREMARGIN_FILLED").isNotNull())
-            .filter(col("PERIOD").geq(4))
-            .filter(col("game_clock_seconds").leq(300))
-            .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
-            .select(
-                col("GAME_ID").alias("game_id"),
-                col("EVENTNUM").alias("event_id"),
-                col("PERIOD").alias("quarter"),
-                col("PLAYER1_ID").alias("player_id"),
-                col("EVENTMSGTYPE").alias("event_type"),
-                col("game_clock_seconds"),
-                col("SCOREMARGIN_FILLED").alias("SCOREMARGIN")
-            );
-
-        return clutchShots;
     }
 
     // Step 2: Find the player's position at the moment the shot was taken.
@@ -85,8 +75,7 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
     private Dataset<Row> joinWithShotLocation(Dataset<Row> clutchShots) {
 
         // Get ball moments (player_id == -1), radius is the ball's height in meters
-        Dataset<Row> ballMoments = moments
-                .filter(col("player_id").equalTo(-1))
+        Dataset<Row> ballMomentsAliased = ballMoments
                 .select(
                     col("game_id").alias("b_game_id"),
                     col("event_id").alias("b_event_id"),
@@ -96,8 +85,7 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                 );
 
         // Get player moments for position lookup
-        Dataset<Row> playerMoments = moments
-                .filter(col("player_id").notEqual(-1))
+        Dataset<Row> playerMomentsAliased = playerMoments
                 .select(
                     col("game_id").alias("m_game_id"),
                     col("event_id").alias("m_event_id"),
@@ -116,7 +104,7 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                 .partitionBy("b_game_id", "b_event_id", "b_quarter")
                 .orderBy(col("b_game_clock").desc());
 
-        Dataset<Row> shotMoments = ballMoments
+        Dataset<Row> shotMoments = ballMomentsAliased
                 .filter(col("ball_height").geq(2.0))
                 .withColumn("rn", row_number().over(shotMomentWindow))
                 .filter(col("rn").equalTo(1))  // first moment ball reached 2m (highest game_clock = earliest)
@@ -137,11 +125,11 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
         );
 
         // Now join with player moments at the exact shot game_clock
-        Dataset<Row> joined = shotsWithClock.join(playerMoments,
-                shotsWithClock.col("game_id").equalTo(playerMoments.col("m_game_id"))
-                .and(shotsWithClock.col("event_id").equalTo(playerMoments.col("m_event_id")))
-                .and(shotsWithClock.col("player_id").equalTo(playerMoments.col("m_player_id")))
-                .and(shotsWithClock.col("quarter").equalTo(playerMoments.col("m_quarter"))),
+        Dataset<Row> joined = shotsWithClock.join(playerMomentsAliased,
+                shotsWithClock.col("game_id").equalTo(playerMomentsAliased.col("m_game_id"))
+                .and(shotsWithClock.col("event_id").equalTo(playerMomentsAliased.col("m_event_id")))
+                .and(shotsWithClock.col("player_id").equalTo(playerMomentsAliased.col("m_player_id")))
+                .and(shotsWithClock.col("quarter").equalTo(playerMomentsAliased.col("m_quarter"))),
                 "inner"
         );
 

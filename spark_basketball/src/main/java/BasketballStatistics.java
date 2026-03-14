@@ -46,30 +46,38 @@ public class BasketballStatistics {
         Dataset<Row> momentsInMeters = moments
                 .withColumn("x_loc",  col("x_loc").multiply(FEET_TO_METERS))
                 .withColumn("y_loc",  col("y_loc").multiply(FEET_TO_METERS))
-                .withColumn("radius", col("radius").multiply(FEET_TO_METERS))
-                .cache(); // cache since both branches below derive from this
-
-        // ── Step 2: Deduplicate for distance and possession tasks ──────────
-        // ClutchTimeEfficiency needs the raw (non-deduped) moments to detect
-        // ball height per event accurately — so deduplication happens after
-        // passing momentsInMeters to ClutchTimeEfficiency
-        Dataset<Row> dedupedMoments = momentsInMeters
+                .withColumn("radius", col("radius").multiply(FEET_TO_METERS));
+        
+        // ── Split into ball and player moments once ────────────────────────
+        // Cached since multiple classes read from these
+        // Deduped player moments — used by DistanceTravelled and BallPossession
+        Dataset<Row> playerMoments = momentsInMeters
+                .filter(col("player_id").notEqual(-1))
+                .cache();
+        
+        Dataset<Row> playerMomentsDeduped = playerMoments
                 .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
-                .sort(col("game_id"), col("quarter"), col("game_clock").desc(), col("player_id"));
+                .cache();
+
+        Dataset<Row> ballMoments = momentsInMeters
+                .filter(col("player_id").equalTo(-1))
+                .cache();
+        
+        Dataset<Row> ballMomentsDeduped = ballMoments
+                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+                .cache();
+
 
         // ── 3.2.1 Distance per player ──────────────────────────────────────
-        Dataset<Row> distancePerQuarter = new DistanceTravelled(dedupedMoments, minutesPlayed).compute();
-        distancePerQuarter.show(100);
+        Dataset<Row> distancePerQuarter = new DistanceTravelled(playerMomentsDeduped, minutesPlayed).compute();
         saveAsCSV(distancePerQuarter, outputDir, "distance_per_player.csv", fs);
 
         // ── 3.2.2 Ball possession ──────────────────────────────────────────
-        Dataset<Row> possession = new BallPossession(dedupedMoments, minutesPlayed).compute();
-        possession.show(100);
+        Dataset<Row> possession = new BallPossession(playerMomentsDeduped, ballMomentsDeduped, minutesPlayed).compute();
         saveAsCSV(possession, outputDir, "possession_per_player.csv", fs);
 
         // ── 3.2.3 Clutch time efficiency ───────────────────────────────────
-        Dataset<Row> clutchEfficiency = new ClutchTimeEfficiency(momentsInMeters, events).compute();
-        clutchEfficiency.show(100);
+        Dataset<Row> clutchEfficiency = new ClutchTimeEfficiency(playerMoments, ballMoments, events).compute();
         saveAsCSV(clutchEfficiency, outputDir, "clutch_efficiency.csv", fs);
 
         momentsInMeters.unpersist();
