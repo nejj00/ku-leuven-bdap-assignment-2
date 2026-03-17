@@ -37,6 +37,25 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
         return result;
     }
 
+    public Dataset<Row> getCurryShotLocations() {
+        Dataset<Row> clutchShots = identifyClutchShots();
+        Dataset<Row> withLocation = joinWithShotLocation(clutchShots);
+        Dataset<Row> withShotType = classifyShotType(withLocation);
+
+        return withShotType
+                .filter(col("player_id").equalTo(201939))
+                .select(
+                    col("player_id"),
+                    col("event_type"),   // 1=made, 2=missed
+                    col("shot_type"),    // "2pt" or "3pt"
+                    col("x_loc"),
+                    col("y_loc"),
+                    col("dist_to_basket"),
+                    col("game_clock_seconds"),
+                    col("game_id")
+                );
+    }
+
     // Step 1: Filter events to clutch time shot attempts only
     private Dataset<Row> identifyClutchShots() {
         WindowSpec fillWindow = Window

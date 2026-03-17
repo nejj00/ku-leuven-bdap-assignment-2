@@ -8,113 +8,210 @@ import static org.apache.spark.sql.functions.*;
 
 public class BasketballStatistics {
 
-    public static void main(String[] args) throws Exception {
-        if (args.length < 2) {
-            System.out.println("Usage: BasketballStatistics <path_to_data_dir> <path_to_output_dir>");
-            System.exit(0);
+        enum Task {
+                DISTANCE,
+                POSSESSION,
+                CLUTCH,
+                CURRY;
+
+                public static Task fromString(String s) {
+                        switch (s.toLowerCase().trim()) {
+                                case "distance":
+                                        return DISTANCE;
+                                case "possession":
+                                        return POSSESSION;
+                                case "clutch":
+                                        return CLUTCH;
+                                case "curry":
+                                        return CURRY;
+                                default:
+                                        throw new IllegalArgumentException(
+                                                        "Unknown task '" + s
+                                                                        + "'. Valid options: distance, possession, clutch");
+                        }
+                }
         }
 
-        String dataDir   = args[0].endsWith("/") ? args[0].substring(0, args[0].length() - 1) : args[0];
-        String outputDir = args[1].endsWith("/") ? args[1].substring(0, args[1].length() - 1) : args[1];
+        public static void main(String[] args) throws Exception {
+                if (args.length < 3) {
+                        System.out.println(
+                                        "Usage: BasketballStatistics <task> <path_to_data_dir> <path_to_output_dir>");
+                        System.out.println("Tasks: distance | possession | clutch | curry");
+                        System.exit(0);
+                }
 
-        SparkSession spark = SparkSession.builder()
-                .appName("Basketball Statistics")
-                .getOrCreate();
+                Task task = Task.fromString(args[0]);
+                String dataDir = args[1].endsWith("/") ? args[1].substring(0, args[1].length() - 1) : args[1];
+                String outputDir = args[2].endsWith("/") ? args[2].substring(0, args[2].length() - 1) : args[2];
 
-        FileSystem fs = FileSystem.get(spark.sparkContext().hadoopConfiguration());
+                System.out.println("Running task: " + task);
 
-        // ── Load CSVs ──────────────────────────────────────────────────────
-        Dataset<Row> minutesPlayed = spark.read()
-                .option("header", "true")
-                .option("inferSchema", "true")
-                .csv(dataDir + "/minutes_played.csv");
+                SparkSession spark = SparkSession.builder()
+                                .appName("Basketball Statistics — " + task)
+                                .getOrCreate();
 
-        Dataset<Row> events = spark.read()
-                .option("header", "true")
-                .option("inferSchema", "true")
-                .csv(dataDir + "/events/*.csv");
+                FileSystem fs = FileSystem.get(spark.sparkContext().hadoopConfiguration());
 
-        Dataset<Row> moments = spark.read()
-                .option("header", "true")
-                .option("inferSchema", "true")
-                .csv(dataDir + "/moments/*.csv");
+                final double FEET_TO_METERS = 0.3048;
 
-        // ── Step 1: Convert all positional columns to meters once ──────────
-        // All downstream tasks use meters — do this conversion a single time
-        final double FEET_TO_METERS = 0.3048;
+                switch (task) {
+                        case DISTANCE:
+                                runDistance(spark, fs, dataDir, outputDir, FEET_TO_METERS);
+                                break;
+                        case POSSESSION:
+                                runPossession(spark, fs, dataDir, outputDir, FEET_TO_METERS);
+                                break;
+                        case CLUTCH:
+                                runClutch(spark, fs, dataDir, outputDir, FEET_TO_METERS);
+                                break;
+                        case CURRY:
+                                runCurry(spark, fs, dataDir, outputDir, FEET_TO_METERS);
+                                break;
+                }
 
-        Dataset<Row> momentsInMeters = moments
-                .withColumn("x_loc",  col("x_loc").multiply(FEET_TO_METERS))
-                .withColumn("y_loc",  col("y_loc").multiply(FEET_TO_METERS))
-                .withColumn("radius", col("radius").multiply(FEET_TO_METERS));
-        
-        // ── Split into ball and player moments once ────────────────────────
-        // Cached since multiple classes read from these
-        // Deduped player moments — used by DistanceTravelled and BallPossession
-        Dataset<Row> playerMoments = momentsInMeters
-                .filter(col("player_id").notEqual(-1))
-                .cache();
-        
-        Dataset<Row> playerMomentsDeduped = playerMoments
-                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
-                .cache();
-
-        Dataset<Row> ballMoments = momentsInMeters
-                .filter(col("player_id").equalTo(-1))
-                .cache();
-        
-        Dataset<Row> ballMomentsDeduped = ballMoments
-                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
-                .cache();
-
-
-        // ── 3.2.1 Distance per player ──────────────────────────────────────
-        Dataset<Row> distancePerQuarter = new DistanceTravelled(playerMomentsDeduped, minutesPlayed).compute();
-        saveAsCSV(distancePerQuarter, outputDir, "distance_per_player.csv", fs);
-
-        // ── 3.2.2 Ball possession ──────────────────────────────────────────
-        Dataset<Row> possession = new BallPossession(playerMomentsDeduped, ballMomentsDeduped, minutesPlayed).compute();
-        saveAsCSV(possession, outputDir, "possession_per_player.csv", fs);
-
-        // ── 3.2.3 Clutch time efficiency ───────────────────────────────────
-        Dataset<Row> clutchEfficiency = new ClutchTimeEfficiency(playerMoments, ballMoments, events).compute();
-        saveAsCSV(clutchEfficiency, outputDir, "clutch_efficiency.csv", fs);
-
-        momentsInMeters.unpersist();
-
-        spark.stop();
-    }
-
-    // Write to a temp directory, then rename the part file to the exact required filename
-    private static void saveAsCSV(Dataset<Row> df, String outputDir,
-                                   String filename, FileSystem fs) throws Exception {
-        String tmpPath   = outputDir + "/tmp_" + filename;
-        String finalPath = outputDir + "/" + filename;
-
-        df.coalesce(1)
-          .write()
-          .option("header", "true")
-          .option("delimiter", " ")
-          .mode("overwrite")
-          .csv(tmpPath);
-
-        FileStatus[] files = fs.listStatus(new Path(tmpPath));
-        Path partFile = null;
-        for (FileStatus f : files) {
-            if (f.getPath().getName().startsWith("part-")) {
-                partFile = f.getPath();
-                break;
-            }
+                spark.stop();
         }
 
-        if (partFile == null) {
-            throw new RuntimeException("No part file found in " + tmpPath);
+        // ── 3.2.1 Distance per player ──────────────────────────────────────────
+        private static void runDistance(SparkSession spark, FileSystem fs,
+                        String dataDir, String outputDir,
+                        double feetToMeters) throws Exception {
+                Dataset<Row> minutesPlayed = loadCSV(spark, dataDir + "/minutes_played.csv");
+
+                Dataset<Row> playerMoments = loadMoments(spark, dataDir, feetToMeters)
+                                .filter(col("player_id").notEqual(-1))
+                                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+                                .cache();
+
+                Dataset<Row> result = new DistanceTravelled(playerMoments, minutesPlayed).compute();
+                saveAsCSV(result, outputDir, "distance_per_player.csv", fs);
+
+                playerMoments.unpersist();
         }
 
-        fs.delete(new Path(finalPath), false);
-        fs.rename(partFile, new Path(finalPath));
-        fs.delete(new Path(tmpPath), true);
+        // ── 3.2.2 Ball possession ──────────────────────────────────────────────
+        private static void runPossession(SparkSession spark, FileSystem fs,
+                        String dataDir, String outputDir,
+                        double feetToMeters) throws Exception {
+                Dataset<Row> minutesPlayed = loadCSV(spark, dataDir + "/minutes_played.csv");
 
-        System.out.println("Saved: " + finalPath);
-    }
+                Dataset<Row> momentsInMeters = loadMoments(spark, dataDir, feetToMeters);
+
+                Dataset<Row> playerMoments = momentsInMeters
+                                .filter(col("player_id").notEqual(-1))
+                                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+                                .cache();
+
+                Dataset<Row> ballMoments = momentsInMeters
+                                .filter(col("player_id").equalTo(-1))
+                                .dropDuplicates("game_id", "player_id", "quarter", "game_clock")
+                                .cache();
+
+                Dataset<Row> result = new BallPossession(playerMoments, ballMoments, minutesPlayed).compute();
+                saveAsCSV(result, outputDir, "possession_per_player.csv", fs);
+
+                playerMoments.unpersist();
+                ballMoments.unpersist();
+        }
+
+        // ── 3.2.3 Clutch time efficiency ───────────────────────────────────────
+        private static void runClutch(SparkSession spark, FileSystem fs,
+                        String dataDir, String outputDir,
+                        double feetToMeters) throws Exception {
+                Dataset<Row> events = loadCSV(spark, dataDir + "/events/*.csv");
+
+                Dataset<Row> momentsInMeters = loadMoments(spark, dataDir, feetToMeters);
+
+                // Clutch needs non-deduped moments — all event_id rows needed for ball height
+                // detection
+                Dataset<Row> playerMoments = momentsInMeters
+                                .filter(col("player_id").notEqual(-1))
+                                .cache();
+
+                Dataset<Row> ballMoments = momentsInMeters
+                                .filter(col("player_id").equalTo(-1))
+                                .cache();
+
+                Dataset<Row> result = new ClutchTimeEfficiency(playerMoments, ballMoments, events).compute();
+                saveAsCSV(result, outputDir, "clutch_efficiency.csv", fs);
+
+                playerMoments.unpersist();
+                ballMoments.unpersist();
+        }
+
+        private static void runCurry(SparkSession spark, FileSystem fs,
+                        String dataDir, String outputDir,
+                        double feetToMeters) throws Exception {
+
+                Dataset<Row> events = loadCSV(spark, dataDir + "/events/*.csv");
+
+                Dataset<Row> momentsInMeters = loadMoments(spark, dataDir, feetToMeters);
+
+                // Clutch needs non-deduped moments — all event_id rows needed for ball height
+                // detection
+                Dataset<Row> playerMoments = momentsInMeters
+                                .filter(col("player_id").notEqual(-1))
+                                .cache();
+
+                Dataset<Row> ballMoments = momentsInMeters
+                                .filter(col("player_id").equalTo(-1))
+                                .cache();
+
+                Dataset<Row> result = new ClutchTimeEfficiency(playerMoments, ballMoments, events)
+                                .getCurryShotLocations();
+                saveAsCSV(result, outputDir, "curry_shot_locations.csv", fs);
+
+                playerMoments.unpersist();
+                ballMoments.unpersist();
+        }
+
+        // ── Shared loaders ─────────────────────────────────────────────────────
+
+        private static Dataset<Row> loadCSV(SparkSession spark, String path) {
+                return spark.read()
+                                .option("header", "true")
+                                .option("inferSchema", "true")
+                                .csv(path);
+        }
+
+        private static Dataset<Row> loadMoments(SparkSession spark, String dataDir, double feetToMeters) {
+                return loadCSV(spark, dataDir + "/moments/*.csv")
+                                .withColumn("x_loc", col("x_loc").multiply(feetToMeters))
+                                .withColumn("y_loc", col("y_loc").multiply(feetToMeters))
+                                .withColumn("radius", col("radius").multiply(feetToMeters));
+        }
+
+        // ── CSV writer ─────────────────────────────────────────────────────────
+
+        private static void saveAsCSV(Dataset<Row> df, String outputDir,
+                        String filename, FileSystem fs) throws Exception {
+                String tmpPath = outputDir + "/tmp_" + filename;
+                String finalPath = outputDir + "/" + filename;
+
+                df.coalesce(1)
+                                .write()
+                                .option("header", "true")
+                                .option("delimiter", " ")
+                                .mode("overwrite")
+                                .csv(tmpPath);
+
+                FileStatus[] files = fs.listStatus(new Path(tmpPath));
+                Path partFile = null;
+                for (FileStatus f : files) {
+                        if (f.getPath().getName().startsWith("part-")) {
+                                partFile = f.getPath();
+                                break;
+                        }
+                }
+
+                if (partFile == null) {
+                        throw new RuntimeException("No part file found in " + tmpPath);
+                }
+
+                fs.delete(new Path(finalPath), false);
+                fs.rename(partFile, new Path(finalPath));
+                fs.delete(new Path(tmpPath), true);
+
+                System.out.println("Saved: " + finalPath);
+        }
 }
