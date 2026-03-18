@@ -198,40 +198,269 @@ fmatrix evaluate_simd(const fmatrix& x, const fmatrix& y,
     return output;
 }
 
+
+fmatrix evaluate_simd_faster(const fmatrix& x, const fmatrix& y,
+                        const fmatrix& coef, float intercept) {
+    fmatrix output(x.nrows, 1, 1, 1);
+
+    size_t ncols = x.ncols;
+    size_t nrows = x.nrows;
+
+    // Helper: horizontally reduce __m256 to a single float
+    auto hsum = [](const __m256& v) -> float {
+        __m128 low  = _mm256_castps256_ps128(v);
+        __m128 high = _mm256_extractf128_ps(v, 1);
+        __m128 s    = _mm_add_ps(low, high);
+        s = _mm_hadd_ps(s, s);
+        s = _mm_hadd_ps(s, s);
+        return _mm_cvtss_f32(s);
+    };
+
+    if (ncols >= 32) {
+        // ── Strategy A: many features — 8 rows × 4 accumulators ──────────
+        // Amortizes coefficient loads across 8 rows, hides FMA latency
+        size_t i = 0;
+        for (; i + 7 < nrows; i += 8) {
+            __m256 acc0a = _mm256_setzero_ps(), acc0b = _mm256_setzero_ps(),
+                   acc0c = _mm256_setzero_ps(), acc0d = _mm256_setzero_ps();
+            __m256 acc1a = _mm256_setzero_ps(), acc1b = _mm256_setzero_ps(),
+                   acc1c = _mm256_setzero_ps(), acc1d = _mm256_setzero_ps();
+            __m256 acc2a = _mm256_setzero_ps(), acc2b = _mm256_setzero_ps(),
+                   acc2c = _mm256_setzero_ps(), acc2d = _mm256_setzero_ps();
+            __m256 acc3a = _mm256_setzero_ps(), acc3b = _mm256_setzero_ps(),
+                   acc3c = _mm256_setzero_ps(), acc3d = _mm256_setzero_ps();
+            __m256 acc4a = _mm256_setzero_ps(), acc4b = _mm256_setzero_ps(),
+                   acc4c = _mm256_setzero_ps(), acc4d = _mm256_setzero_ps();
+            __m256 acc5a = _mm256_setzero_ps(), acc5b = _mm256_setzero_ps(),
+                   acc5c = _mm256_setzero_ps(), acc5d = _mm256_setzero_ps();
+            __m256 acc6a = _mm256_setzero_ps(), acc6b = _mm256_setzero_ps(),
+                   acc6c = _mm256_setzero_ps(), acc6d = _mm256_setzero_ps();
+            __m256 acc7a = _mm256_setzero_ps(), acc7b = _mm256_setzero_ps(),
+                   acc7c = _mm256_setzero_ps(), acc7d = _mm256_setzero_ps();
+
+            size_t j = 0;
+            for (; j + 31 < ncols; j += 32) {
+                __m256 c0 = _mm256_loadu_ps(coef.ptr(j,      0));
+                __m256 c1 = _mm256_loadu_ps(coef.ptr(j + 8,  0));
+                __m256 c2 = _mm256_loadu_ps(coef.ptr(j + 16, 0));
+                __m256 c3 = _mm256_loadu_ps(coef.ptr(j + 24, 0));
+
+                acc0a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i,   j     )), c0, acc0a);
+                acc0b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i,   j + 8 )), c1, acc0b);
+                acc0c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i,   j + 16)), c2, acc0c);
+                acc0d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i,   j + 24)), c3, acc0d);
+
+                acc1a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+1, j     )), c0, acc1a);
+                acc1b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+1, j + 8 )), c1, acc1b);
+                acc1c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+1, j + 16)), c2, acc1c);
+                acc1d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+1, j + 24)), c3, acc1d);
+
+                acc2a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+2, j     )), c0, acc2a);
+                acc2b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+2, j + 8 )), c1, acc2b);
+                acc2c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+2, j + 16)), c2, acc2c);
+                acc2d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+2, j + 24)), c3, acc2d);
+
+                acc3a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+3, j     )), c0, acc3a);
+                acc3b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+3, j + 8 )), c1, acc3b);
+                acc3c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+3, j + 16)), c2, acc3c);
+                acc3d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+3, j + 24)), c3, acc3d);
+
+                acc4a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+4, j     )), c0, acc4a);
+                acc4b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+4, j + 8 )), c1, acc4b);
+                acc4c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+4, j + 16)), c2, acc4c);
+                acc4d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+4, j + 24)), c3, acc4d);
+
+                acc5a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+5, j     )), c0, acc5a);
+                acc5b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+5, j + 8 )), c1, acc5b);
+                acc5c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+5, j + 16)), c2, acc5c);
+                acc5d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+5, j + 24)), c3, acc5d);
+
+                acc6a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+6, j     )), c0, acc6a);
+                acc6b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+6, j + 8 )), c1, acc6b);
+                acc6c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+6, j + 16)), c2, acc6c);
+                acc6d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+6, j + 24)), c3, acc6d);
+
+                acc7a = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+7, j     )), c0, acc7a);
+                acc7b = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+7, j + 8 )), c1, acc7b);
+                acc7c = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+7, j + 16)), c2, acc7c);
+                acc7d = _mm256_fmadd_ps(_mm256_loadu_ps(x.ptr(i+7, j + 24)), c3, acc7d);
+            }
+
+            // Merge 4 accumulators per row
+            __m256 s0 = _mm256_add_ps(_mm256_add_ps(acc0a, acc0b), _mm256_add_ps(acc0c, acc0d));
+            __m256 s1 = _mm256_add_ps(_mm256_add_ps(acc1a, acc1b), _mm256_add_ps(acc1c, acc1d));
+            __m256 s2 = _mm256_add_ps(_mm256_add_ps(acc2a, acc2b), _mm256_add_ps(acc2c, acc2d));
+            __m256 s3 = _mm256_add_ps(_mm256_add_ps(acc3a, acc3b), _mm256_add_ps(acc3c, acc3d));
+            __m256 s4 = _mm256_add_ps(_mm256_add_ps(acc4a, acc4b), _mm256_add_ps(acc4c, acc4d));
+            __m256 s5 = _mm256_add_ps(_mm256_add_ps(acc5a, acc5b), _mm256_add_ps(acc5c, acc5d));
+            __m256 s6 = _mm256_add_ps(_mm256_add_ps(acc6a, acc6b), _mm256_add_ps(acc6c, acc6d));
+            __m256 s7 = _mm256_add_ps(_mm256_add_ps(acc7a, acc7b), _mm256_add_ps(acc7c, acc7d));
+
+            // Scalar remainder + intercept for each row
+            auto finish = [&](size_t row, float partial) -> float {
+                for (size_t jj = j; jj < ncols; jj++)
+                    partial += x.get_elem(row, jj) * coef.get_elem(jj, 0);
+                return partial + intercept;
+            };
+
+            output.set_elem(i,   0, finish(i,   hsum(s0)));
+            output.set_elem(i+1, 0, finish(i+1, hsum(s1)));
+            output.set_elem(i+2, 0, finish(i+2, hsum(s2)));
+            output.set_elem(i+3, 0, finish(i+3, hsum(s3)));
+            output.set_elem(i+4, 0, finish(i+4, hsum(s4)));
+            output.set_elem(i+5, 0, finish(i+5, hsum(s5)));
+            output.set_elem(i+6, 0, finish(i+6, hsum(s6)));
+            output.set_elem(i+7, 0, finish(i+7, hsum(s7)));
+        }
+
+        // Remaining rows with single-row SIMD
+        for (; i < nrows; i++) {
+            __m256 acc = _mm256_setzero_ps();
+            size_t j = 0;
+            for (; j + 7 < ncols; j += 8) {
+                acc = _mm256_fmadd_ps(
+                    _mm256_loadu_ps(x.ptr(i, j)),
+                    _mm256_loadu_ps(coef.ptr(j, 0)),
+                    acc);
+            }
+            float result = hsum(acc);
+            for (; j < ncols; j++)
+                result += x.get_elem(i, j) * coef.get_elem(j, 0);
+            output.set_elem(i, 0, result + intercept);
+        }
+
+    } else {
+        // ── Strategy B: few features (< 32) — simple single-row SIMD ─────
+        // The multi-row strategy adds too much overhead for short rows.
+        // Just vectorize the dot product per row with 2 accumulators
+        // to hide FMA latency without excess register pressure.
+        for (size_t i = 0; i < nrows; i++) {
+            __m256 acc0 = _mm256_setzero_ps();
+            __m256 acc1 = _mm256_setzero_ps();
+
+            size_t j = 0;
+            for (; j + 15 < ncols; j += 16) {
+                acc0 = _mm256_fmadd_ps(
+                    _mm256_loadu_ps(x.ptr(i, j)),
+                    _mm256_loadu_ps(coef.ptr(j, 0)),
+                    acc0);
+                acc1 = _mm256_fmadd_ps(
+                    _mm256_loadu_ps(x.ptr(i, j + 8)),
+                    _mm256_loadu_ps(coef.ptr(j + 8, 0)),
+                    acc1);
+            }
+            for (; j + 7 < ncols; j += 8) {
+                acc0 = _mm256_fmadd_ps(
+                    _mm256_loadu_ps(x.ptr(i, j)),
+                    _mm256_loadu_ps(coef.ptr(j, 0)),
+                    acc0);
+            }
+
+            float result = hsum(_mm256_add_ps(acc0, acc1));
+            for (; j < ncols; j++)
+                result += x.get_elem(i, j) * coef.get_elem(j, 0);
+            output.set_elem(i, 0, result + intercept);
+        }
+    }
+
+    return output;
+}
+
+
+
+// int main(int argc, char *argv[])
+// {
+//     // These are four linear regression models
+//     auto &&[x, y, coef, intercept] = read_bin_data("data/calhouse.bin");
+//     // auto &&[x, y, coef, intercept] = read_bin_data("data/allstate.bin");
+//     //auto &&[x, y, coef, intercept] = read_bin_data("data/diamonds.bin");
+//     //auto &&[x, y, coef, intercept] = read_bin_data("data/cpusmall.bin");
+
+//     // This is a logistic regression model, but can be evaluated in the same way
+//     // All you would need to do is apply the sigmoid to the values in `output_*`
+//     //auto &&[x, y, coef, intercept] = read_bin_data("data/mnist_5vall.bin");
+    
+//     // TODO repeat the number of time measurements to get a more accurate
+//     // estimate of the runtime.
+
+//     steady_clock::time_point tbegin, tend;
+
+//     // SCALAR
+//     tbegin = steady_clock::now();
+//     auto output_scalar = evaluate_scalar(x, y, coef, intercept);
+//     tend = steady_clock::now();
+
+//     std::cout << "Evaluated scalar in "
+//         << (duration_cast<microseconds>(tend-tbegin).count()/1000.0)
+//         << "ms" << std::endl;
+
+//     // SIMD
+//     tbegin = steady_clock::now();
+//     auto output_simd = evaluate_simd(x, y, coef, intercept);
+//     tend = steady_clock::now();
+
+//     std::cout << "Evaluated SIMD in "
+//         << (duration_cast<microseconds>(tend-tbegin).count()/1000.0)
+//         << "ms" << std::endl;
+
+//     // TODO check output
+// }
+
 int main(int argc, char *argv[])
 {
-    // These are four linear regression models
-    // auto &&[x, y, coef, intercept] = read_bin_data("data/calhouse.bin");
-    auto &&[x, y, coef, intercept] = read_bin_data("data/allstate.bin");
-    //auto &&[x, y, coef, intercept] = read_bin_data("data/diamonds.bin");
-    //auto &&[x, y, coef, intercept] = read_bin_data("data/cpusmall.bin");
+    const char* datasets[] = {
+        "data/calhouse.bin",
+        "data/allstate.bin",
+        "data/diamonds.bin",
+        "data/cpusmall.bin",
+        "data/mnist_5vall.bin"
+    };
 
-    // This is a logistic regression model, but can be evaluated in the same way
-    // All you would need to do is apply the sigmoid to the values in `output_*`
-    //auto &&[x, y, coef, intercept] = read_bin_data("data/mnist_5vall.bin");
-    
-    // TODO repeat the number of time measurements to get a more accurate
-    // estimate of the runtime.
+    const int NUM_RUNS = 100;
 
-    steady_clock::time_point tbegin, tend;
+    for (const char* dataset : datasets) {
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "Dataset: " << dataset << std::endl;
+        std::cout << "========================================" << std::endl;
 
-    // SCALAR
-    tbegin = steady_clock::now();
-    auto output_scalar = evaluate_scalar(x, y, coef, intercept);
-    tend = steady_clock::now();
+        fmatrix x(0, 0, 0, 0), y(0, 0, 0, 0), coef(0, 0, 0, 0);
+        float intercept = 0.0f;
 
-    std::cout << "Evaluated scalar in "
-        << (duration_cast<microseconds>(tend-tbegin).count()/1000.0)
-        << "ms" << std::endl;
+        try {
+            auto &&[x_, y_, coef_, intercept_] = read_bin_data(dataset);
+            x = std::move(x_);
+            y = std::move(y_);
+            coef = std::move(coef_);
+            intercept = intercept_;
+        } catch (const std::exception& e) {
+            std::cout << "Skipping — " << e.what() << std::endl;
+            continue;
+        }
 
-    // SIMD
-    tbegin = steady_clock::now();
-    auto output_simd = evaluate_simd(x, y, coef, intercept);
-    tend = steady_clock::now();
+        double scalar_total = 0.0;
+        fmatrix output_scalar(0, 0, 0, 0);
+        for (int run = 0; run < NUM_RUNS; run++) {
+            auto tbegin = steady_clock::now();
+            output_scalar = evaluate_scalar(x, y, coef, intercept);
+            auto tend = steady_clock::now();
+            scalar_total += duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+        }
+        double scalar_avg = scalar_total / NUM_RUNS;
 
-    std::cout << "Evaluated SIMD in "
-        << (duration_cast<microseconds>(tend-tbegin).count()/1000.0)
-        << "ms" << std::endl;
+        double simd_total = 0.0;
+        fmatrix output_simd(0, 0, 0, 0);
+        for (int run = 0; run < NUM_RUNS; run++) {
+            auto tbegin = steady_clock::now();
+            output_simd = evaluate_simd_faster(x, y, coef, intercept);
+            auto tend = steady_clock::now();
+            simd_total += duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+        }
+        double simd_avg = simd_total / NUM_RUNS;
 
-    // TODO check output
+        std::cout << "Scalar avg (" << NUM_RUNS << " runs): " << scalar_avg << "ms" << std::endl;
+        std::cout << "SIMD   avg (" << NUM_RUNS << " runs): " << simd_avg   << "ms" << std::endl;
+        std::cout << "Speedup:    " << (scalar_avg / simd_avg) << "x" << std::endl;
+    }
+
+    return 0;
 }
