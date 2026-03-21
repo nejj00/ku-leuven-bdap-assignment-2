@@ -72,7 +72,6 @@ public class BasketballStatistics {
                 spark.stop();
         }
 
-        // ── 3.2.1 Distance per player ──────────────────────────────────────────
         private static void runDistance(SparkSession spark, FileSystem fs,
                         String dataDir, String outputDir,
                         double feetToMeters) throws Exception {
@@ -89,7 +88,6 @@ public class BasketballStatistics {
                 playerMoments.unpersist();
         }
 
-        // ── 3.2.2 Ball possession ──────────────────────────────────────────────
         private static void runPossession(SparkSession spark, FileSystem fs,
                         String dataDir, String outputDir,
                         double feetToMeters) throws Exception {
@@ -114,7 +112,6 @@ public class BasketballStatistics {
                 ballMoments.unpersist();
         }
 
-        // ── 3.2.3 Clutch time efficiency ───────────────────────────────────────
         private static void runClutch(SparkSession spark, FileSystem fs,
                         String dataDir, String outputDir,
                         double feetToMeters) throws Exception {
@@ -122,8 +119,6 @@ public class BasketballStatistics {
 
                 Dataset<Row> momentsInMeters = loadMoments(spark, dataDir, feetToMeters);
 
-                // Clutch needs non-deduped moments — all event_id rows needed for ball height
-                // detection
                 Dataset<Row> playerMoments = momentsInMeters
                                 .filter(col("player_id").notEqual(-1))
                                 .cache();
@@ -147,8 +142,6 @@ public class BasketballStatistics {
 
                 Dataset<Row> momentsInMeters = loadMoments(spark, dataDir, feetToMeters);
 
-                // Clutch needs non-deduped moments — all event_id rows needed for ball height
-                // detection
                 Dataset<Row> playerMoments = momentsInMeters
                                 .filter(col("player_id").notEqual(-1))
                                 .cache();
@@ -165,8 +158,6 @@ public class BasketballStatistics {
                 ballMoments.unpersist();
         }
 
-        // ── Shared loaders ─────────────────────────────────────────────────────
-
         private static Dataset<Row> loadCSV(SparkSession spark, String path) {
                 return spark.read()
                                 .option("header", "true")
@@ -180,8 +171,6 @@ public class BasketballStatistics {
                                 .withColumn("y_loc", col("y_loc").multiply(feetToMeters))
                                 .withColumn("radius", col("radius").multiply(feetToMeters));
         }
-
-        // ── CSV writer ─────────────────────────────────────────────────────────
 
         private static void saveAsCSV(Dataset<Row> df, String outputDir,
                         String filename, FileSystem fs) throws Exception {
