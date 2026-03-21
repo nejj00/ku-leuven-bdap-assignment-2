@@ -28,6 +28,6 @@ spark-submit \
     --class BasketballStatistics \
     --master $MASTER \
     target/*.jar \
-    possession \
+    distance \
     $DATA_DIR \
     $OUTPUT_DIR
