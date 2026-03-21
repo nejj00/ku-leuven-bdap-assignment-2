@@ -179,7 +179,7 @@ public class BasketballStatistics {
 
                 df.coalesce(1)
                                 .write()
-                                .option("header", "true")
+                                .option("header", "false")
                                 .option("delimiter", " ")
                                 .mode("overwrite")
                                 .csv(tmpPath);
