@@ -11,14 +11,12 @@ public class ClutchTimeEfficiency {
     private final Dataset<Row> ballMoments;
     private final Dataset<Row> events;
 
-    // After converting to meters, half court is at x = 94 * 0.3048 / 2 = 14.326m
-    private static final double HALF_COURT_M     = 94 * 0.3048 / 2;  // 14.326m
-    private static final double LEFT_BASKET_X_M  = 5.25  * 0.3048;   // 1.600m
-    private static final double BASKET_Y_M  = 25.0  * 0.3048;   // 7.620m
-    private static final double RIGHT_BASKET_X_M = 88.75 * 0.3048;   // 27.051m
+    private static final double HALF_COURT_M = 94 * 0.3048 / 2; // 14.326m
+    private static final double LEFT_BASKET_X_M = 5.25 * 0.3048; // 1.600m
+    private static final double BASKET_Y_M = 25.0 * 0.3048; // 7.620m
+    private static final double RIGHT_BASKET_X_M = 88.75 * 0.3048; // 27.051m
 
-// 3-point line radius from the assignment: 6.71 meters
-private static final double THREE_POINT_RADIUS_M = 6.71;
+    private static final double THREE_POINT_RADIUS_M = 6.71;
 
     public ClutchTimeEfficiency(Dataset<Row> playerMoments, Dataset<Row> ballMoments, Dataset<Row> events) {
         this.playerMoments = playerMoments;
@@ -45,18 +43,16 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
         return withShotType
                 .filter(col("player_id").equalTo(201939))
                 .select(
-                    col("player_id"),
-                    col("event_type"),   // 1=made, 2=missed
-                    col("shot_type"),    // "2pt" or "3pt"
-                    col("x_loc"),
-                    col("y_loc"),
-                    col("dist_to_basket"),
-                    col("game_clock_seconds"),
-                    col("game_id")
-                );
+                        col("player_id"),
+                        col("event_type"),
+                        col("shot_type"),
+                        col("x_loc"),
+                        col("y_loc"),
+                        col("dist_to_basket"),
+                        col("game_clock_seconds"),
+                        col("game_id"));
     }
 
-    // Step 1: Filter events to clutch time shot attempts only
     private Dataset<Row> identifyClutchShots() {
         WindowSpec fillWindow = Window
                 .partitionBy("GAME_ID")
@@ -64,85 +60,69 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                 .rowsBetween(Window.unboundedPreceding(), 0);
 
         return events
-                // filter to shots first — reduces rows before the expensive window fill
                 .filter(col("EVENTMSGTYPE").isin(1, 2))
                 .withColumn("SCOREMARGIN_FILLED",
-                    last(col("SCOREMARGIN"), true).over(fillWindow)
-                )
-                .withColumn("pc_str",             date_format(col("PCTIMESTRING"), "HH:mm"))
-                .withColumn("minutes",            expr("cast(split(pc_str, ':')[0] as int)"))
-                .withColumn("seconds",            expr("cast(split(pc_str, ':')[1] as int)"))
+                        last(col("SCOREMARGIN"), true).over(fillWindow))
+                .withColumn("pc_str", date_format(col("PCTIMESTRING"), "HH:mm"))
+                .withColumn("minutes", expr("cast(split(pc_str, ':')[0] as int)"))
+                .withColumn("seconds", expr("cast(split(pc_str, ':')[1] as int)"))
                 .withColumn("game_clock_seconds", expr("minutes * 60 + seconds"))
                 .filter(col("SCOREMARGIN_FILLED").isNotNull())
                 .filter(col("PERIOD").geq(4))
                 .filter(col("game_clock_seconds").leq(300))
                 .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
                 .select(
-                    col("GAME_ID").alias("game_id"),
-                    col("EVENTNUM").alias("event_id"),
-                    col("PERIOD").alias("quarter"),
-                    col("PLAYER1_ID").alias("player_id"),
-                    col("EVENTMSGTYPE").alias("event_type"),
-                    col("game_clock_seconds")
-                );
+                        col("GAME_ID").alias("game_id"),
+                        col("EVENTNUM").alias("event_id"),
+                        col("PERIOD").alias("quarter"),
+                        col("PLAYER1_ID").alias("player_id"),
+                        col("EVENTMSGTYPE").alias("event_type"),
+                        col("game_clock_seconds"));
     }
 
-    // Step 2: Find the player's position at the moment the shot was taken.
-    // The assignment warns that pbp and tracking timestamps may not be perfectly
-    // synced, so we join on event_id and then pick the moment whose game_clock
-    // is closest to the shot's game_clock_seconds among all moments for that event.
     private Dataset<Row> joinWithShotLocation(Dataset<Row> clutchShots) {
 
         Dataset<Row> playerMomentsAliased = playerMoments
                 .select(
-                    col("game_id").alias("m_game_id"),
-                    col("event_id").alias("m_event_id"),
-                    col("player_id").alias("m_player_id"),
-                    col("quarter").alias("m_quarter"),
-                    col("game_clock").alias("m_game_clock"),
-                    col("x_loc"),
-                    col("y_loc")
-                );
+                        col("game_id").alias("m_game_id"),
+                        col("event_id").alias("m_event_id"),
+                        col("player_id").alias("m_player_id"),
+                        col("quarter").alias("m_quarter"),
+                        col("game_clock").alias("m_game_clock"),
+                        col("x_loc"),
+                        col("y_loc"));
 
-        // Join ball moments with clutch shots upfront — carry all needed columns through
-        // so we never need to join back to clutchShots again
         WindowSpec eventWindow = Window.partitionBy("game_id", "event_id", "quarter");
 
         Dataset<Row> shotMoments = ballMoments
                 .join(clutchShots,
-                    ballMoments.col("game_id").equalTo(clutchShots.col("game_id"))
-                    .and(ballMoments.col("event_id").equalTo(clutchShots.col("event_id")))
-                    .and(ballMoments.col("quarter").equalTo(clutchShots.col("quarter"))),
-                    "inner"
-                )
+                        ballMoments.col("game_id").equalTo(clutchShots.col("game_id"))
+                                .and(ballMoments.col("event_id").equalTo(clutchShots.col("event_id")))
+                                .and(ballMoments.col("quarter").equalTo(clutchShots.col("quarter"))),
+                        "inner")
                 .select(
-                    ballMoments.col("game_id"),
-                    ballMoments.col("event_id"),
-                    ballMoments.col("quarter"),
-                    ballMoments.col("game_clock"),
-                    col("radius").alias("ball_height"),
-                    clutchShots.col("player_id"),       
-                    clutchShots.col("event_type"),      
-                    clutchShots.col("game_clock_seconds")
-                )
+                        ballMoments.col("game_id"),
+                        ballMoments.col("event_id"),
+                        ballMoments.col("quarter"),
+                        ballMoments.col("game_clock"),
+                        col("radius").alias("ball_height"),
+                        clutchShots.col("player_id"),
+                        clutchShots.col("event_type"),
+                        clutchShots.col("game_clock_seconds"))
                 .withColumn("above_2m_clock",
-                    max(when(col("ball_height").geq(2.0), col("game_clock"))).over(eventWindow)
-                )
-                .withColumn("max_height",         max("ball_height").over(eventWindow))
+                        max(when(col("ball_height").geq(2.0), col("game_clock"))).over(eventWindow))
+                .withColumn("max_height", max("ball_height").over(eventWindow))
                 .withColumn("max_height_clock",
-                    max(when(col("ball_height").equalTo(col("max_height")), col("game_clock"))).over(eventWindow)
-                )
-                .withColumn("shot_game_clock",    coalesce(col("above_2m_clock"), col("max_height_clock")))
+                        max(when(col("ball_height").equalTo(col("max_height")), col("game_clock"))).over(eventWindow))
+                .withColumn("shot_game_clock", coalesce(col("above_2m_clock"), col("max_height_clock")))
                 .dropDuplicates("game_id", "event_id", "quarter");
 
-        // Directly join with player moments — no intermediate join back to clutchShots needed
         Dataset<Row> joined = shotMoments.join(playerMomentsAliased,
                 shotMoments.col("game_id").equalTo(playerMomentsAliased.col("m_game_id"))
-                .and(shotMoments.col("event_id").equalTo(playerMomentsAliased.col("m_event_id")))
-                .and(shotMoments.col("player_id").equalTo(playerMomentsAliased.col("m_player_id")))
-                .and(shotMoments.col("quarter").equalTo(playerMomentsAliased.col("m_quarter"))),
-                "inner"
-        );
+                        .and(shotMoments.col("event_id").equalTo(playerMomentsAliased.col("m_event_id")))
+                        .and(shotMoments.col("player_id").equalTo(playerMomentsAliased.col("m_player_id")))
+                        .and(shotMoments.col("quarter").equalTo(playerMomentsAliased.col("m_quarter"))),
+                "inner");
 
         WindowSpec pickClosest = Window
                 .partitionBy("game_id", "event_id", "player_id", "quarter")
@@ -152,86 +132,71 @@ private static final double THREE_POINT_RADIUS_M = 6.71;
                 .withColumn("rn", row_number().over(pickClosest))
                 .filter(col("rn").equalTo(1))
                 .select(
-                    col("game_id"),
-                    col("player_id"),
-                    col("event_id"),
-                    col("quarter"),
-                    col("event_type"),
-                    col("game_clock_seconds"),
-                    col("shot_game_clock").alias("tracking_game_clock"),
-                    col("ball_height"),
-                    col("x_loc"),
-                    col("y_loc")
-                );
-    }
-
-        // Step 3: Determine which basket the player is shooting at based on their
-        // x position, compute distance to that basket, and classify as 2pt or 3pt.
-        private Dataset<Row> classifyShotType(Dataset<Row> withLocation) {
-            return withLocation
-                    // Player on left half → shooting at left basket, right half → right basket
-                    .withColumn("basket_x",
-                        when(col("x_loc").lt(HALF_COURT_M), lit(LEFT_BASKET_X_M))
-                        .otherwise(lit(RIGHT_BASKET_X_M))
-                    )
-                    .withColumn("basket_y", lit(BASKET_Y_M))
-                    .withColumn("dist_to_basket",
-                        expr("sqrt(pow(x_loc - basket_x, 2) + pow(y_loc - basket_y, 2))")
-                    )
-                    // 2pt if within 6.71m of basket, 3pt if beyond
-                    .withColumn("shot_type",
-                        when(col("dist_to_basket").leq(THREE_POINT_RADIUS_M), lit("2pt"))
-                        .otherwise(lit("3pt"))
-                    )
-                    .select(
                         col("game_id"),
                         col("player_id"),
-                        col("event_type"),      // 1=made, 2=missed
                         col("event_id"),
-                        col("shot_type"),       // "2pt" or "3pt"
+                        col("quarter"),
+                        col("event_type"),
+                        col("game_clock_seconds"),
+                        col("shot_game_clock").alias("tracking_game_clock"),
+                        col("ball_height"),
+                        col("x_loc"),
+                        col("y_loc"));
+    }
+
+    private Dataset<Row> classifyShotType(Dataset<Row> withLocation) {
+        return withLocation
+                .withColumn("basket_x",
+                        when(col("x_loc").lt(HALF_COURT_M), lit(LEFT_BASKET_X_M))
+                                .otherwise(lit(RIGHT_BASKET_X_M)))
+                .withColumn("basket_y", lit(BASKET_Y_M))
+                .withColumn("dist_to_basket",
+                        expr("sqrt(pow(x_loc - basket_x, 2) + pow(y_loc - basket_y, 2))"))
+                // 2pt if within 6.71m of basket, 3pt if beyond
+                .withColumn("shot_type",
+                        when(col("dist_to_basket").leq(THREE_POINT_RADIUS_M), lit("2pt"))
+                                .otherwise(lit("3pt")))
+                .select(
+                        col("game_id"),
+                        col("player_id"),
+                        col("event_type"),
+                        col("event_id"),
+                        col("shot_type"),
                         col("dist_to_basket"),
                         col("x_loc"),
                         col("y_loc"),
                         col("game_clock_seconds"),
-                        col("tracking_game_clock")
-                    );
-        }
+                        col("tracking_game_clock"));
+    }
 
     private Dataset<Row> aggregateEfficiency(Dataset<Row> withShotType) {
-        // Count total attempts and made shots per player per shot type
         Dataset<Row> agg = withShotType
                 .groupBy("player_id", "shot_type")
                 .agg(
-                    count("*").alias("nb_shots"),
-                    sum(when(col("event_type").equalTo(1), 1).otherwise(0)).alias("nb_made")
-                );
+                        count("*").alias("nb_shots"),
+                        sum(when(col("event_type").equalTo(1), 1).otherwise(0)).alias("nb_made"));
 
-        // Pivot to get one row per player with 2pt and 3pt columns side by side
         Dataset<Row> pivoted = agg
                 .groupBy("player_id")
                 .pivot("shot_type", java.util.Arrays.asList("2pt", "3pt"))
                 .agg(
-                    first("nb_shots").alias("shots"),
-                    first("nb_made").alias("made")
-                )
-                .na().fill(0);  // players with no 2pt or no 3pt attempts get 0
+                        first("nb_shots").alias("shots"),
+                        first("nb_made").alias("made"))
+                .na().fill(0); // players with no 2pt or no 3pt attempts get 0
 
         return pivoted
                 .withColumn("2pts_efficiency",
-                    when(col("2pt_shots").equalTo(0), lit(0.0))
-                    .otherwise(round(col("2pt_made").divide(col("2pt_shots")), 2))
-                )
+                        when(col("2pt_shots").equalTo(0), lit(0.0))
+                                .otherwise(round(col("2pt_made").divide(col("2pt_shots")), 2)))
                 .withColumn("3pts_efficiency",
-                    when(col("3pt_shots").equalTo(0), lit(0.0))
-                    .otherwise(round(col("3pt_made").divide(col("3pt_shots")), 2))
-                )
+                        when(col("3pt_shots").equalTo(0), lit(0.0))
+                                .otherwise(round(col("3pt_made").divide(col("3pt_shots")), 2)))
                 .select(
-                    col("player_id"),
-                    col("2pts_efficiency"),
-                    col("2pt_shots").alias("nb_2pts_shots"),
-                    col("3pts_efficiency"),
-                    col("3pt_shots").alias("nb_3pts_shots")
-                )
+                        col("player_id"),
+                        col("2pts_efficiency"),
+                        col("2pt_shots").alias("nb_2pts_shots"),
+                        col("3pts_efficiency"),
+                        col("3pt_shots").alias("nb_3pts_shots"))
                 .orderBy(col("2pts_efficiency").desc());
     }
 }

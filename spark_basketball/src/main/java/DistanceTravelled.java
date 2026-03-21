@@ -18,13 +18,11 @@ public class DistanceTravelled {
     public Dataset<Row> compute() {
         Dataset<Row> withDistances = computeDistances();
         Dataset<Row> totalDistance = aggregateTotalDistance(withDistances);
-        Dataset<Row> totalMinutes  = aggregateTotalMinutes();
+        Dataset<Row> totalMinutes = aggregateTotalMinutes();
         return computeDistancePerQuarter(totalDistance, totalMinutes);
     }
 
-    // Add x_next/y_next columns and compute Euclidean distance in meters
     private Dataset<Row> computeDistances() {
-        // Partition by quarter so lead() does not connect across quarter boundaries
         WindowSpec window = Window
                 .partitionBy("game_id", "player_id", "quarter")
                 .orderBy(col("game_clock").desc());
@@ -34,20 +32,17 @@ public class DistanceTravelled {
                 .withColumn("y_next", lead("y_loc", 1).over(window))
                 .withColumn("clock_next", lead("game_clock", 1).over(window))
                 .withColumn("dist_m", expr(
-                    "case when x_next is not null and (game_clock - clock_next) <= 0.5 " +
-                    "then sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2)) " +
-                    "else 0 end"
-                ));
+                        "case when x_next is not null and (game_clock - clock_next) <= 0.5 " +
+                                "then sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2)) " +
+                                "else 0 end"));
     }
 
-    // Sum distances per player across all games
     private Dataset<Row> aggregateTotalDistance(Dataset<Row> withDistances) {
         return withDistances
                 .groupBy("player_id")
                 .agg(sum("dist_m").alias("total_distance_m"));
     }
 
-    // Sum seconds played per player across all games, convert to minutes
     private Dataset<Row> aggregateTotalMinutes() {
         return minutesPlayed
                 .groupBy("player_id")
@@ -55,11 +50,9 @@ public class DistanceTravelled {
                 .withColumn("total_minutes", col("total_seconds").divide(60));
     }
 
-    // Join distance and minutes, apply normalization formula
     private Dataset<Row> computeDistancePerQuarter(Dataset<Row> totalDistance, Dataset<Row> totalMinutes) {
         return totalDistance
                 .join(totalMinutes, "player_id")
-                // Formula: TotalDistance * 12 / minutes_played  (12 min per quarter)
                 .withColumn("distance_per_quarter_m",
                         round(expr("total_distance_m * 12 / total_minutes"), 2))
                 .select("player_id", "distance_per_quarter_m")
