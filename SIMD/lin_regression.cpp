@@ -12,6 +12,7 @@
 #include <vector>
 #include <tuple>
 #include <immintrin.h>
+#include <cmath>
 
 using std::chrono::duration_cast;
 using std::chrono::microseconds;
@@ -269,9 +270,9 @@ int main(int argc, char *argv[])
 {
     const char *datasets[] = {
         "data/calhouse.bin",
-        "data/allstate.bin",
-        "data/diamonds.bin",
         "data/cpusmall.bin",
+        "data/diamonds.bin",
+        "data/allstate.bin",
         "data/mnist_5vall.bin"};
 
     const int NUM_RUNS = 100;
@@ -299,6 +300,7 @@ int main(int argc, char *argv[])
             continue;
         }
 
+        std::vector<double> scalar_times;
         double scalar_total = 0.0;
         fmatrix output_scalar(0, 0, 0, 0);
         for (int run = 0; run < NUM_RUNS; run++)
@@ -306,10 +308,21 @@ int main(int argc, char *argv[])
             auto tbegin = steady_clock::now();
             output_scalar = evaluate_scalar(x, y, coef, intercept);
             auto tend = steady_clock::now();
-            scalar_total += duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+
+            double time = duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+            scalar_times.push_back(time);
+            scalar_total += time;
         }
         double scalar_avg = scalar_total / NUM_RUNS;
+        double scalar_var = 0.0;
+        for (double t : scalar_times)
+        {
+            scalar_var += (t - scalar_avg) * (t - scalar_avg);
+        }
+        scalar_var /= NUM_RUNS;
+        double scalar_std = std::sqrt(scalar_var);
 
+        std::vector<double> simd_times;
         double simd_total = 0.0;
         fmatrix output_simd(0, 0, 0, 0);
         for (int run = 0; run < NUM_RUNS; run++)
@@ -317,12 +330,24 @@ int main(int argc, char *argv[])
             auto tbegin = steady_clock::now();
             output_simd = evaluate_simd(x, y, coef, intercept);
             auto tend = steady_clock::now();
-            simd_total += duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+
+            double time = duration_cast<microseconds>(tend - tbegin).count() / 1000.0;
+            simd_times.push_back(time);
+            simd_total += time;
         }
         double simd_avg = simd_total / NUM_RUNS;
+        double simd_var = 0.0;
+        for (double t : simd_times)
+        {
+            simd_var += (t - simd_avg) * (t - simd_avg);
+        }
+        simd_var /= NUM_RUNS;
+        double simd_std = std::sqrt(simd_var);
 
-        std::cout << "Scalar avg (" << NUM_RUNS << " runs): " << scalar_avg << "ms" << std::endl;
-        std::cout << "SIMD   avg (" << NUM_RUNS << " runs): " << simd_avg << "ms" << std::endl;
+        std::cout << "Scalar avg (" << NUM_RUNS << " runs): " << scalar_avg 
+                  << "ms (std: " << scalar_std << ")" << std::endl;
+        std::cout << "SIMD   avg (" << NUM_RUNS << " runs): " << simd_avg  
+                  << "ms (std: " << simd_std << ")" << std::endl;
         std::cout << "Speedup:    " << (scalar_avg / simd_avg) << "x" << std::endl;
     }
 
