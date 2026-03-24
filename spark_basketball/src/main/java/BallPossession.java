@@ -14,8 +14,6 @@ public class BallPossession {
     private static final double SECONDS_PER_MOMENT = 1.0 / 25.0;
     private static final double POSSESSION_RADIUS_M = 0.5;
 
-        
-
     public BallPossession(Dataset<Row> playerMoments, Dataset<Row> ballMoments, Dataset<Row> minutesPlayed) {
         this.playerMoments = playerMoments;
         this.ballMoments = ballMoments;
@@ -30,7 +28,6 @@ public class BallPossession {
         possessionMoments.unpersist();
         return result;
     }
-
 
     private Dataset<Row> getPossessionMoments() {
         Dataset<Row> ball = extractBall();
@@ -84,7 +81,8 @@ public class BallPossession {
                 .withColumn("x_next", lead("x_loc", 1).over(window))
                 .withColumn("y_next", lead("y_loc", 1).over(window))
                 .withColumn("clock_next", lead("game_clock", 1).over(window))
-                // As with the DistanceTravelled class we avoid counting large jumps from non subsequent moments
+                // As with the DistanceTravelled class we avoid counting large jumps from non
+                // subsequent moments
                 .withColumn("dist_m", expr(
                         "case when x_next is not null and (game_clock - clock_next) <= 0.5 " +
                                 "then sqrt(pow(x_loc - x_next, 2) + pow(y_loc - y_next, 2)) " +

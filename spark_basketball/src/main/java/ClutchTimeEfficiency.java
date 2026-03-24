@@ -28,7 +28,6 @@ public class ClutchTimeEfficiency {
 
     private static final int STEPTH_CURRY_ID = 201939;
 
-
     public ClutchTimeEfficiency(Dataset<Row> playerMoments, Dataset<Row> ballMoments, Dataset<Row> events) {
         this.playerMoments = playerMoments;
         this.ballMoments = ballMoments;
@@ -120,7 +119,8 @@ public class ClutchTimeEfficiency {
                         clutchShots.col("player_id"),
                         clutchShots.col("event_type"),
                         clutchShots.col("game_clock_seconds"))
-                // The shot location is approximated as the location of the ball when it's height hits 2m or is at its max height for the shot (miss or made) event.
+                // The shot location is approximated as the location of the ball when it's
+                // height hits 2m or is at its max height for the shot (miss or made) event.
                 .withColumn("above_2m_clock",
                         max(when(col("ball_height").geq(BALL_HEIGHT_THRESHOLD_M), col("game_clock"))).over(eventWindow))
                 .withColumn("max_height", max("ball_height").over(eventWindow))
