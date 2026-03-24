@@ -280,3 +280,26 @@ rm -r output_folder
 - No hardcoded local paths
 - Runs on departmental machines
 - Source code included in `src/`
+
+
+# 11. Useful commands in cluste
+
+```bash
+# List files
+hadoop fs -ls /user/r1035493/output
+
+# Delete all output files in DFS
+hadoop fs -rm -r -skipTrash /user/r1035493/output/*
+
+# Check current jobs in cluster
+yarn application -list
+
+# Show only running jobs
+yarn application -list -appStates RUNNING
+
+# Show all states including finished and failed
+yarn application -list -appStates ALL
+
+# Copy output folder from DFS
+hadoop fs -copyToLocal /user/r1035493/output ~/output
+```
