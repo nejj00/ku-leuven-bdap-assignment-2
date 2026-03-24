@@ -18,6 +18,17 @@ public class ClutchTimeEfficiency {
 
     private static final double THREE_POINT_RADIUS_M = 6.71;
 
+    private static final int CLUTCH_TIME_SECONDS = 300;
+    private static final int CLUTCH_SCORE_MARGIN = 5;
+
+    private static final short EVENT_TYPE_MADE = 1;
+    private static final short EVENT_TYPE_MISSED = 2;
+
+    private static final short BALL_HEIGHT_THRESHOLD_M = 2;
+
+    private static final int STEPTH_CURRY_ID = 201939;
+
+
     public ClutchTimeEfficiency(Dataset<Row> playerMoments, Dataset<Row> ballMoments, Dataset<Row> events) {
         this.playerMoments = playerMoments;
         this.ballMoments = ballMoments;
@@ -41,7 +52,7 @@ public class ClutchTimeEfficiency {
         Dataset<Row> withShotType = classifyShotType(withLocation);
 
         return withShotType
-                .filter(col("player_id").equalTo(201939))
+                .filter(col("player_id").equalTo(STEPTH_CURRY_ID))
                 .select(
                         col("player_id"),
                         col("event_type"),
@@ -60,7 +71,7 @@ public class ClutchTimeEfficiency {
                 .rowsBetween(Window.unboundedPreceding(), 0);
 
         return events
-                .filter(col("EVENTMSGTYPE").isin(1, 2))
+                .filter(col("EVENTMSGTYPE").isin(EVENT_TYPE_MADE, EVENT_TYPE_MISSED))
                 .withColumn("SCOREMARGIN_FILLED",
                         last(col("SCOREMARGIN"), true).over(fillWindow))
                 .withColumn("pc_str", date_format(col("PCTIMESTRING"), "HH:mm"))
@@ -69,8 +80,8 @@ public class ClutchTimeEfficiency {
                 .withColumn("game_clock_seconds", expr("minutes * 60 + seconds"))
                 .filter(col("SCOREMARGIN_FILLED").isNotNull())
                 .filter(col("PERIOD").geq(4))
-                .filter(col("game_clock_seconds").leq(300))
-                .filter(abs(col("SCOREMARGIN_FILLED")).leq(5))
+                .filter(col("game_clock_seconds").leq(CLUTCH_TIME_SECONDS))
+                .filter(abs(col("SCOREMARGIN_FILLED")).leq(CLUTCH_SCORE_MARGIN))
                 .select(
                         col("GAME_ID").alias("game_id"),
                         col("EVENTNUM").alias("event_id"),
@@ -109,8 +120,9 @@ public class ClutchTimeEfficiency {
                         clutchShots.col("player_id"),
                         clutchShots.col("event_type"),
                         clutchShots.col("game_clock_seconds"))
+                // The shot location is approximated as the location of the ball when it's height hits 2m or is at its max height for the shot (miss or made) event.
                 .withColumn("above_2m_clock",
-                        max(when(col("ball_height").geq(2.0), col("game_clock"))).over(eventWindow))
+                        max(when(col("ball_height").geq(BALL_HEIGHT_THRESHOLD_M), col("game_clock"))).over(eventWindow))
                 .withColumn("max_height", max("ball_height").over(eventWindow))
                 .withColumn("max_height_clock",
                         max(when(col("ball_height").equalTo(col("max_height")), col("game_clock"))).over(eventWindow))
@@ -174,7 +186,7 @@ public class ClutchTimeEfficiency {
                 .groupBy("player_id", "shot_type")
                 .agg(
                         count("*").alias("nb_shots"),
-                        sum(when(col("event_type").equalTo(1), 1).otherwise(0)).alias("nb_made"));
+                        sum(when(col("event_type").equalTo(EVENT_TYPE_MADE), 1).otherwise(0)).alias("nb_made"));
 
         Dataset<Row> pivoted = agg
                 .groupBy("player_id")
