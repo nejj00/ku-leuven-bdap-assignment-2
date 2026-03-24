@@ -19,7 +19,8 @@ public class ClutchTimeEfficiency {
     private static final double THREE_POINT_RADIUS_M = 6.71;
 
     private static final int CLUTCH_TIME_SECONDS = 300;
-    private static final int CLUTCH_SCORE_MARGIN = 5;
+    private static final short CLUTCH_SCORE_MARGIN = 5;
+    private static final short PERIOD_OVERTIME_THRESHOLD = 4;
 
     private static final short EVENT_TYPE_MADE = 1;
     private static final short EVENT_TYPE_MISSED = 2;
@@ -78,7 +79,7 @@ public class ClutchTimeEfficiency {
                 .withColumn("seconds", expr("cast(split(pc_str, ':')[1] as int)"))
                 .withColumn("game_clock_seconds", expr("minutes * 60 + seconds"))
                 .filter(col("SCOREMARGIN_FILLED").isNotNull())
-                .filter(col("PERIOD").geq(4))
+                .filter(col("PERIOD").geq(PERIOD_OVERTIME_THRESHOLD))
                 .filter(col("game_clock_seconds").leq(CLUTCH_TIME_SECONDS))
                 .filter(abs(col("SCOREMARGIN_FILLED")).leq(CLUTCH_SCORE_MARGIN))
                 .select(
