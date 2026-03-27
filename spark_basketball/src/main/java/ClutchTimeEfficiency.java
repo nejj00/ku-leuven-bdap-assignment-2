@@ -2,8 +2,20 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.expressions.Window;
 import org.apache.spark.sql.expressions.WindowSpec;
-
-import static org.apache.spark.sql.functions.*;
+import static org.apache.spark.sql.functions.abs;
+import static org.apache.spark.sql.functions.coalesce;
+import static org.apache.spark.sql.functions.col;
+import static org.apache.spark.sql.functions.count;
+import static org.apache.spark.sql.functions.date_format;
+import static org.apache.spark.sql.functions.expr;
+import static org.apache.spark.sql.functions.first;
+import static org.apache.spark.sql.functions.last;
+import static org.apache.spark.sql.functions.lit;
+import static org.apache.spark.sql.functions.max;
+import static org.apache.spark.sql.functions.round;
+import static org.apache.spark.sql.functions.row_number;
+import static org.apache.spark.sql.functions.sum;
+import static org.apache.spark.sql.functions.when;
 
 public class ClutchTimeEfficiency {
 
@@ -46,6 +58,11 @@ public class ClutchTimeEfficiency {
         return result;
     }
 
+    /**
+    * Return a dataset with the locations of Curry's shots in clutch time, 
+    * along with the shot type (2pt or 3pt) and whether the shot was made or missed. 
+    * The result of this method is used for creating the shot chart in the report.
+    */
     public Dataset<Row> getCurryShotLocations() {
         Dataset<Row> clutchShots = identifyClutchShots();
         Dataset<Row> withLocation = joinWithShotLocation(clutchShots);

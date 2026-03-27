@@ -13,10 +13,10 @@ fig, ax = plt.subplots(figsize=(9, 5))
 
 counts, bins, _ = ax.hist(
     possession["possession_fraction"],
-    bins=10,
-    color="#2563eb",
-    edgecolor="white",
-    linewidth=0.5
+    bins=15,
+    color="royalblue",
+    edgecolor="black",
+    linewidth=1.5
 )
 
 mean_val = possession["possession_fraction"].mean()
@@ -28,11 +28,11 @@ bin_edges    = bins
 bin_midpoints = (bins[:-1] + bins[1:]) / 2
 x_ticks = np.sort(np.concatenate([bin_edges, bin_midpoints]))
 ax.set_xticks(x_ticks)
-ax.set_xticklabels([f"{t:.3f}" for t in x_ticks], rotation=45, ha="right", fontsize=8)
+ax.set_xticklabels([f"{t:.3f}" for t in x_ticks], ha="right", fontsize=10, rotation=45)
 
 ax.set_xlabel("Fraction of time in ball possession (normalized by total time on court)", fontsize=12)
 ax.set_ylabel("Number of players", fontsize=12)
-ax.set_title("Distribution of ball possession time across players", fontsize=13)
+# ax.set_title("Distribution of ball possession time across players", fontsize=13)
 ax.legend()
 
 plt.tight_layout()

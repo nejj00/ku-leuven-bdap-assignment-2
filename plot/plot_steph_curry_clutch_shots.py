@@ -42,7 +42,7 @@ ax.scatter(made["x_plot"],   made["y_plot"],
 ax.scatter(missed["x_plot"], missed["y_plot"],
            c="red",   marker="x", s=120, zorder=5, label=f"Missed ({len(missed)})", linewidths=2)
 
-ax.set_title("Stephen Curry — Clutch Time Field Goal Attempts", fontsize=13)
+# ax.set_title("Stephen Curry — Clutch Time Field Goal Attempts", fontsize=13)
 ax.legend(loc="upper left", fontsize=10)
 
 plt.tight_layout()
