@@ -269,12 +269,13 @@ fmatrix evaluate_simd(const fmatrix &x, const fmatrix &y,
 int main(int argc, char *argv[])
 {
     const char *datasets[] = {
-        "data/calhouse.bin",
-        "data/cpusmall.bin",
-        "data/diamonds.bin",
-        "data/allstate.bin",
-        "data/mnist_5vall.bin"};
-
+        "/cw/bdap/assignment2/simd/calhouse.bin",
+        "/cw/bdap/assignment2/simd/cpusmall.bin",
+        "/cw/bdap/assignment2/simd/diamonds.bin",
+        "/cw/bdap/assignment2/simd/allstate.bin",
+        "/cw/bdap/assignment2/simd/mnist_5vall.bin"
+    };
+    
     const int NUM_RUNS = 100;
 
     for (const char *dataset : datasets)
