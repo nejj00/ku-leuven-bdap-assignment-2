@@ -31,9 +31,6 @@ public class DistanceTravelled {
                 .withColumn("x_next", lead("x_loc", 1).over(window))
                 .withColumn("y_next", lead("y_loc", 1).over(window))
                 .withColumn("clock_next", lead("game_clock", 1).over(window))
-                // TODO Explain in the report that 0.5 is picked after doing some EDA on the
-                // distribution of time differences between subsequent moments. This helps to
-                // avoid counting large jumps when a player is substituted or data is miissing.
                 // Calculate distance from current moment to the next one if the next moment is
                 // within 0.5 seconds, otherwise set to 0.
                 // This helps to avoid counting large jumps when a player is substituted or data
